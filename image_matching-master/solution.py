@@ -211,6 +211,6 @@ def main(image,max_iters,epsilon,win_size,verbose):
     draw_matches(matches, img_left_clr, img_right_clr)
 
 if __name__ == "__main__":
-    main(image = "island.jpg",max_iters=1000,epsilon=100,win_size=50, verbose=True)
+    main(image = "test_image2.jpg",max_iters=1000,epsilon=100,win_size=50, verbose=True)
 
 
