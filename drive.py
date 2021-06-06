@@ -66,8 +66,21 @@ def send_control(steering_angle, throttle):
 
 
 if __name__ == '__main__':
+    from keras.models import model_from_json
 
-    model = load_model('model.h5')
+    # load model from json
+    json_path = 'pretrained/model.json'
+    with open(json_path) as jfile:
+        model = model_from_json(jfile.read())
+
+    # load model weights
+    # weights_path = os.path.join('checkpoints', os.listdir('checkpoints')[-1])
+    weights_path = 'pretrained/model.hdf5'
+    print('Loading weights: {}'.format(weights_path))
+    model.load_weights(weights_path)
+
+    # compile the model
+    model.compile("adam", "mse")
 
     # wrap Flask application with engineio's middleware
     app = socketio.Middleware(sio, app)
