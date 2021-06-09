@@ -1,93 +1,54 @@
-import cv2
+import socketio
+import eventlet
 import numpy as np
-import matplotlib.pyplot as plt
+from flask import Flask
+# from tensorflow.keras.preprocessing.image import img_to_array
+from keras.models import load_model
+import base64
+from io import BytesIO
+from PIL import Image
+import cv2
+
+sio = socketio.Server()
+
+app = Flask(__name__)
+speed_limit = 10
+def img_preprocess(img):
+    img = img[60:135,:,:]
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2YUV)
+    img = cv2.GaussianBlur(img,  (3, 3), 0)
+    img = cv2.resize(img, (200, 66))
+    img = img/255
+    return img
 
 
-def canny(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    canny = cv2.Canny(blur, 50, 150)
-    return canny
+@sio.on('telemetry')
+def telemetry(sid, data):
+    speed = float(data['speed'])
+    image = Image.open(BytesIO(base64.b64decode(data['image'])))
+    image = np.asarray(image)
+    image = img_preprocess(image)
+    image = np.array([image])
+    steering_angle = float(model.predict(image))
+    throttle = 1.0 - speed/speed_limit
+    print('{} {} {}'.format(steering_angle, throttle, speed))
+    send_control(steering_angle, throttle)
 
 
-def region_int(img):
-    height = img.shape[0]
-    area = np.array([[(200, height), (1100, height), (550, 220)]])
-    mask = np.zeros_like(img)
-    cv2.fillPoly(mask, area, 255)
-    masked = cv2.bitwise_and(img, mask)
-    return masked
+
+@sio.on('connect')
+def connect(sid, environ):
+    print('Connected')
+    send_control(0, 0)
+
+def send_control(steering_angle, throttle):
+    sio.emit('steer', data = {
+        'steering_angle': steering_angle.__str__(),
+        'throttle': throttle.__str__()
+    })
 
 
-def disp_lines(img, lines):
-    line_img = np.zeros_like(img)
-    if lines is not None:
-        for line in lines:
-            x1, y1, x2, y2 = line.reshape(4)
-            cv2.line(line_img, (x1, y1), (x2, y2), (255, 0, 0), 10)
-    return line_img
-
-
-def make_coordinates(img, line_parameters):
-    slope, intercept = line_parameters
-    y1 = img.shape[0]
-    y2 = int(y1 * (3 / 5))
-    x1 = int((y1 - intercept) / slope)
-    x2 = int((y2 - intercept) / slope)
-    return np.array([x1, y1, x2, y2])
-
-
-def averaged_slope_intercept(img, lines):
-    leftfit = []
-    rightfit = []
-    if lines is not None:
-        for line in lines:
-            x1, y1, x2, y2 = line.reshape(4)
-            parameters = np.polyfit((x1, x2), (y1, y2), 1)
-            slope = parameters[0]
-            intercept = parameters[1]
-            if slope < 0:
-                leftfit.append((slope, intercept))
-            else:
-                rightfit.append((slope, intercept))
-        left_average = np.average(leftfit, axis=0)
-        right_average = np.average(rightfit, axis=0)
-
-        if right_average is not None:
-            right_line = make_coordinates(img, right_average)
-        if left_average is not None:
-            print(left_average)
-            left_line = make_coordinates(img, left_average)
-    return np.array([left_line, right_line])
-
-
-def lane_detect(img):
-    canny_image = canny(img)
-    cropped = region_int(canny_image)
-    lines = cv2.HoughLinesP(cropped, 2, np.pi / 180, 100, np.array([]), minLineLength=10, maxLineGap=5)
-    averaged = averaged_slope_intercept(img, lines)
-    line_image = disp_lines(img, averaged)
-    detected = cv2.addWeighted(img, 0.8, line_image, 1, 1)
-    return detected
-
-
-if __name__ == "__main__":
-    # image = cv2.imread('test_image.jpg')
-    # lane_image = np.copy(image)
-    # imposed = lane_detect(lane_image)
-    # cv2.imshow('image', imposed)
-    # cv2.waitKey(0)
-
-    cap = cv2.VideoCapture('test2.mp4')
-    while cap.isOpened():
-        _, frame = cap.read()
-        canny_image = canny(frame)
-        cropped = region_int(canny_image)
-        lines = cv2.HoughLinesP(cropped, 2, np.pi / 180, 100, np.array([]), minLineLength=10, maxLineGap=5)
-        averaged = averaged_slope_intercept(frame, lines)
-        line_image = disp_lines(frame, averaged)
-        detected = cv2.addWeighted(frame, 0.8, line_image, 1, 1)
-        cv2.imshow('image', detected)
-        if cv2.waitKey(1) == ord('q'):
-            break
-
+if __name__ == '__main__':
+    model = load_model('model.h5')
+    app = socketio.Middleware(sio, app)
+    eventlet.wsgi.server(eventlet.listen(('', 4567)), app)
